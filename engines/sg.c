@@ -12,12 +12,54 @@
 #include <sys/poll.h>
 
 #include "../fio.h"
+#include "../optgroup.h"
 
 #ifdef FIO_HAVE_SGIO
 
 #define MAX_10B_LBA  0xFFFFFFFFULL
 #define SCSI_TIMEOUT_MS 30000   // 30 second timeout; currently no method to override
 #define MAX_SB 64               // sense block maximum return size
+
+struct sg_options {
+	void *pad;
+	unsigned int write_mode;
+};
+
+enum {
+	FIO_SG_WRITE		= 1,
+	FIO_SG_WRITE_VERIFY	= 2,
+	FIO_SG_WRITE_SAME	= 3
+};
+
+static struct fio_option options[] = {
+	{
+		.name	= "sg_write_mode",
+		.lname	= "specify sg write mode",
+		.type	= FIO_OPT_STR,
+		.off1	= offsetof(struct sg_options, write_mode),
+		.help	= "Specify SCSI WRITE mode",
+		.def	= "write",
+		.posval = {
+			  { .ival = "write",
+			    .oval = FIO_SG_WRITE,
+			    .help = "Issue standard SCSI WRITE commands",
+			  },
+			  { .ival = "verify",
+			    .oval = FIO_SG_WRITE_VERIFY,
+			    .help = "Issue SCSI WRITE AND VERIFY commands",
+			  },
+			  { .ival = "same",
+			    .oval = FIO_SG_WRITE_SAME,
+			    .help = "Issue SCSI WRITE SAME commands",
+			  },
+		},
+		.category = FIO_OPT_C_ENGINE,
+		.group	= FIO_OPT_G_INVALID,
+	},
+	{
+		.name	= NULL,
+	},
+};
 
 struct sgio_cmd {
 	unsigned char cdb[16];      // enhanced from 10 to support 16 byte commands
@@ -268,6 +310,7 @@ static int fio_sgio_prep(struct thread_data *td, struct io_u *io_u)
 {
 	struct sg_io_hdr *hdr = &io_u->hdr;
 	struct sgio_data *sd = td->io_ops_data;
+	struct sg_options *o = td->eo;
 	long long nr_blocks, lba;
 
 	if (io_u->xfer_buflen & (sd->bs - 1)) {
@@ -290,10 +333,29 @@ static int fio_sgio_prep(struct thread_data *td, struct io_u *io_u)
 		sgio_hdr_init(sd, hdr, io_u, 1);
 
 		hdr->dxfer_direction = SG_DXFER_TO_DEV;
-		if (lba < MAX_10B_LBA)
-			hdr->cmdp[0] = 0x2a; // write(10)
-		else
-			hdr->cmdp[0] = 0x8a; // write(16)
+
+		switch(o->write_mode) {
+		case FIO_SG_WRITE:
+			if (lba < MAX_10B_LBA)
+				hdr->cmdp[0] = 0x2a; // write(10)
+			else
+				hdr->cmdp[0] = 0x8a; // write(16)
+			break;
+		case FIO_SG_WRITE_VERIFY:
+			if (lba < MAX_10B_LBA)
+				hdr->cmdp[0] = 0x2e; // write and verify(10)
+			else
+				hdr->cmdp[0] = 0x8e; // write and verify(16)
+			break;
+			// BYTCHK is disabled by virtue of the memset in sgio_hdr_init
+		case FIO_SG_WRITE_SAME:
+			hdr->dxfer_len = sd->bs;
+			if (lba < MAX_10B_LBA)
+				hdr->cmdp[0] = 0x41; // write same(10)
+			else
+				hdr->cmdp[0] = 0x93; // write same(16)
+			break;
+		};
 	} else {
 		sgio_hdr_init(sd, hdr, io_u, 0);
 		hdr->dxfer_direction = SG_DXFER_NONE;
@@ -809,19 +871,21 @@ static int fio_sgio_get_file_size(struct thread_data *td, struct fio_file *f)
 
 
 static struct ioengine_ops ioengine = {
-	.name		= "sg",
-	.version	= FIO_IOOPS_VERSION,
-	.init		= fio_sgio_init,
-	.prep		= fio_sgio_prep,
-	.queue		= fio_sgio_queue,
-	.getevents	= fio_sgio_getevents,
-	.errdetails	= fio_sgio_errdetails,
-	.event		= fio_sgio_event,
-	.cleanup	= fio_sgio_cleanup,
-	.open_file	= fio_sgio_open,
-	.close_file	= generic_close_file,
-	.get_file_size	= fio_sgio_get_file_size,
-	.flags		= FIO_SYNCIO | FIO_RAWIO,
+	.name			= "sg",
+	.version		= FIO_IOOPS_VERSION,
+	.init			= fio_sgio_init,
+	.prep			= fio_sgio_prep,
+	.queue			= fio_sgio_queue,
+	.getevents		= fio_sgio_getevents,
+	.errdetails		= fio_sgio_errdetails,
+	.event			= fio_sgio_event,
+	.cleanup		= fio_sgio_cleanup,
+	.open_file		= fio_sgio_open,
+	.close_file		= generic_close_file,
+	.get_file_size		= fio_sgio_get_file_size,
+	.options		= options,
+	.option_struct_size	= sizeof(struct sg_options),
+	.flags			= FIO_SYNCIO | FIO_RAWIO,
 };
 
 #else /* FIO_HAVE_SGIO */
