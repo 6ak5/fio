@@ -200,6 +200,8 @@ handle_work:
 		}
 		pthread_mutex_unlock(&sw->lock);
 		handle_list(sw, &local_list);
+		if (wq->ops.update_acct_fn)
+			wq->ops.update_acct_fn(sw);
 	}
 
 	if (wq->ops.update_acct_fn)
