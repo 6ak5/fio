@@ -169,8 +169,6 @@ static void *helper_thread_main(void *data)
 		};
 		fd_set rfds, efds;
 
-		timespec_add_msec(&ts, msec_to_next_event);
-
 		if (read_from_pipe(hd->pipe[0], &action, sizeof(action)) < 0) {
 			FD_ZERO(&rfds);
 			FD_SET(hd->pipe[0], &rfds);
