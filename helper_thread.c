@@ -163,25 +163,9 @@ static void *helper_thread_main(void *data)
 	msec_to_next_event = DISK_UTIL_MSEC;
 	while (!ret && !hd->exit) {
 		uint64_t since_du, since_ss = 0;
-		struct timeval timeout = {
-			.tv_sec  = DISK_UTIL_MSEC / 1000,
-			.tv_usec = (DISK_UTIL_MSEC % 1000) * 1000,
-		};
-		fd_set rfds, efds;
 
-		if (read_from_pipe(hd->pipe[0], &action, sizeof(action)) < 0) {
-			FD_ZERO(&rfds);
-			FD_SET(hd->pipe[0], &rfds);
-			FD_ZERO(&efds);
-			FD_SET(hd->pipe[0], &efds);
-			ret = select(1, &rfds, NULL, &efds, &timeout);
-			if (ret < 0)
-				log_err("fio: select() call in helper thread failed: %s",
-					strerror(errno));
-			if (read_from_pipe(hd->pipe[0], &action, sizeof(action)) <
-			    0)
-				action = 0;
-		}
+		if (read_from_pipe(hd->pipe[0], &action, sizeof(action)) < 0)
+			action = 0;
 
 #ifdef CONFIG_PTHREAD_CONDATTR_SETCLOCK
 		clock_gettime(CLOCK_MONOTONIC, &ts);
